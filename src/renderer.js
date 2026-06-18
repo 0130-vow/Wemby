@@ -59,16 +59,18 @@ function setNotice(message, type = "info") {
 function renderShell(content) {
   const loggedIn = state.settings?.accessToken && state.settings?.server;
   appEl.innerHTML = `
-    <div class="shell">
+    <div class="shell view-${state.currentView}">
       <aside class="sidebar">
         <button class="brand" data-action="home">
           <span class="brand-mark">W</span>
-          <span>Wemby</span>
+          <span class="brand-name">Wemby</span>
         </button>
         <nav class="nav">
-          <button data-action="home" class="${state.currentView === "home" ? "active" : ""}">首页</button>
-          <button data-action="search" class="${state.currentView === "search" ? "active" : ""}">搜索</button>
-          <button data-action="settings" class="${state.currentView === "settings" ? "active" : ""}">设置</button>
+          <span class="nav-label">媒体</span>
+          <button data-action="home" class="${state.currentView === "home" ? "active" : ""}"><span class="nav-icon home-icon"></span>首页</button>
+          <button data-action="search" class="${state.currentView === "search" ? "active" : ""}"><span class="nav-icon search-icon"></span>搜索</button>
+          <span class="nav-label">我的</span>
+          <button data-action="settings" class="${state.currentView === "settings" ? "active" : ""}"><span class="nav-icon settings-icon"></span>设置</button>
         </nav>
         <div class="server-pill">
           <span>${loggedIn ? state.settings.userName || state.settings.username || "已登录" : "未登录"}</span>
@@ -76,8 +78,19 @@ function renderShell(content) {
         </div>
       </aside>
       <main class="main">
+        <header class="app-header">
+          <div class="app-title">
+            <span>${state.currentView === "player" ? "正在播放" : "媒体库"}</span>
+            <small>${loggedIn ? "Emby 已连接" : "未连接"}</small>
+          </div>
+          <div class="app-actions">
+            <button class="icon-button" data-action="search" title="搜索" aria-label="搜索"><span class="search-icon"></span></button>
+            <button class="icon-button" data-action="settings" title="设置" aria-label="设置"><span class="settings-icon"></span></button>
+            <span class="avatar">${(state.settings.userName || state.settings.username || "W").slice(0, 1).toUpperCase()}</span>
+          </div>
+        </header>
         <div class="notice" hidden></div>
-        ${content}
+        <div class="content">${content}</div>
       </main>
     </div>
   `;
@@ -131,8 +144,38 @@ function renderRail(title, items = []) {
     <section class="rail">
       <div class="section-heading">
         <h2>${title}</h2>
+        <button class="rail-more" type="button" aria-label="${title} 更多"></button>
       </div>
       <div class="media-row">${items.map(mediaCard).join("")}</div>
+    </section>
+  `;
+}
+
+function renderHomeHero(items = []) {
+  const hero = items.find((item) => item.BackdropImageUrl || item.ThumbImageUrl || item.PrimaryImageUrl);
+  if (!hero) return "";
+  const image = hero.BackdropImageUrl || hero.ThumbImageUrl || hero.PrimaryImageUrl;
+  const canPlay = hero.Type !== "Series";
+  const resumeTicks = hero.UserData?.PlaybackPositionTicks || 0;
+  const meta = [
+    hero.ProductionYear,
+    formatMinutes(hero.RunTimeTicks),
+    hero.Type
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <section class="home-hero" style="background-image:linear-gradient(90deg, rgba(14,17,20,.96) 0%, rgba(14,17,20,.72) 44%, rgba(14,17,20,.2) 100%), url('${image.replace(/'/g, "%27")}')">
+      <div class="hero-copy">
+        <span class="eyebrow">${hero.SeriesName || "推荐观看"}</span>
+        <h1>${hero.Name}</h1>
+        <div class="hero-meta">${meta}</div>
+        <p>${hero.Overview || "从这里继续你的观影。"} </p>
+        <div class="actions">
+          ${canPlay ? `<button class="primary play-button" data-play="${hero.Id}" data-start="${resumeTicks}"><span class="play-icon"></span>${resumeTicks ? "继续播放" : "播放"}</button>` : ""}
+          <button class="round-button" data-item="${hero.Id}" title="查看详情" aria-label="查看详情">+</button>
+        </div>
+      </div>
+      <div class="hero-dots" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
     </section>
   `;
 }
@@ -208,10 +251,11 @@ async function renderHome() {
       </button>
     `).join("");
     renderShell(`
-      <section class="topbar">
+      ${renderHomeHero([...(state.home.resume || []), ...(state.home.latest || [])])}
+      <section class="topbar library-topbar">
         <div>
           <h1>首页</h1>
-          <p>继续观看、最新入库和媒体库都在这里。</p>
+          <p>继续观看、最新入库和媒体库。</p>
         </div>
         <button class="ghost" data-action="refresh">刷新</button>
       </section>
