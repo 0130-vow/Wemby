@@ -1,0 +1,354 @@
+const state = {
+  settings: {},
+  home: null,
+  currentView: "home",
+  activeLibrary: null,
+  activeItem: null,
+  episodes: [],
+  loading: false
+};
+
+const appEl = document.querySelector("#app");
+
+function formatMinutes(ticks) {
+  if (!ticks) return "";
+  const minutes = Math.round(ticks / 10000000 / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+}
+
+function episodeCode(item) {
+  if (!item.SeriesName) return "";
+  const season = item.ParentIndexNumber ? `S${String(item.ParentIndexNumber).padStart(2, "0")}` : "";
+  const episode = item.IndexNumber ? `E${String(item.IndexNumber).padStart(2, "0")}` : "";
+  return `${season}${episode}`;
+}
+
+function posterStyle(item) {
+  const image = item.PrimaryImageUrl || item.ThumbImageUrl || item.BackdropImageUrl;
+  return image ? `style="background-image:url('${image.replace(/'/g, "%27")}')"` : "";
+}
+
+function setNotice(message, type = "info") {
+  const notice = document.querySelector(".notice");
+  if (!notice) return;
+  notice.textContent = message;
+  notice.dataset.type = type;
+  notice.hidden = !message;
+}
+
+function renderShell(content) {
+  const loggedIn = state.settings?.accessToken && state.settings?.server;
+  appEl.innerHTML = `
+    <div class="shell">
+      <aside class="sidebar">
+        <button class="brand" data-action="home">
+          <span class="brand-mark">W</span>
+          <span>Wemby</span>
+        </button>
+        <nav class="nav">
+          <button data-action="home" class="${state.currentView === "home" ? "active" : ""}">首页</button>
+          <button data-action="search" class="${state.currentView === "search" ? "active" : ""}">搜索</button>
+          <button data-action="settings" class="${state.currentView === "settings" ? "active" : ""}">设置</button>
+        </nav>
+        <div class="server-pill">
+          <span>${loggedIn ? state.settings.userName || state.settings.username || "已登录" : "未登录"}</span>
+          <small>${loggedIn ? state.settings.server : "连接 Emby 后开始"}</small>
+        </div>
+      </aside>
+      <main class="main">
+        <div class="notice" hidden></div>
+        ${content}
+      </main>
+    </div>
+  `;
+}
+
+function renderLogin() {
+  renderShell(`
+    <section class="login-panel">
+      <form id="loginForm" class="form">
+        <h1>连接 Emby</h1>
+        <label>
+          <span>服务器</span>
+          <input name="server" placeholder="http://192.168.1.10:8096" value="${state.settings.server || ""}" required />
+        </label>
+        <label>
+          <span>用户名</span>
+          <input name="username" value="${state.settings.username || ""}" required />
+        </label>
+        <label>
+          <span>密码</span>
+          <input name="password" type="password" />
+        </label>
+        <button class="primary" type="submit">登录</button>
+      </form>
+    </section>
+  `);
+}
+
+function mediaCard(item) {
+  const progress = item.UserData?.PlaybackPositionTicks && item.RunTimeTicks
+    ? Math.min(100, Math.round((item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100))
+    : 0;
+  const sub = [
+    item.Type === "Episode" ? episodeCode(item) : item.ProductionYear,
+    formatMinutes(item.RunTimeTicks)
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <button class="media-card" data-item="${item.Id}">
+      <span class="poster" ${posterStyle(item)}></span>
+      ${progress ? `<span class="progress" style="width:${progress}%"></span>` : ""}
+      <span class="media-title">${item.Name}</span>
+      <span class="media-sub">${sub || item.Type || ""}</span>
+    </button>
+  `;
+}
+
+function renderRail(title, items = []) {
+  if (!items.length) return "";
+  return `
+    <section class="rail">
+      <div class="section-heading">
+        <h2>${title}</h2>
+      </div>
+      <div class="media-row">${items.map(mediaCard).join("")}</div>
+    </section>
+  `;
+}
+
+async function renderHome() {
+  state.currentView = "home";
+  if (!state.settings?.accessToken) return renderLogin();
+  renderShell(`<section class="loading">正在加载媒体库...</section>`);
+  try {
+    state.home = await window.wemby.home();
+    const views = (state.home.views || []).map((view) => `
+      <button class="library-button" data-library="${view.Id}">
+        <span>${view.Name}</span>
+        <small>${view.CollectionType || "媒体库"}</small>
+      </button>
+    `).join("");
+    renderShell(`
+      <section class="topbar">
+        <div>
+          <h1>首页</h1>
+          <p>继续观看、最新入库和媒体库都在这里。</p>
+        </div>
+        <button class="ghost" data-action="refresh">刷新</button>
+      </section>
+      <section class="library-grid">${views}</section>
+      ${renderRail("继续观看", state.home.resume)}
+      ${renderRail("最新入库", state.home.latest)}
+    `);
+  } catch (error) {
+    renderShell(`<section class="empty-state"><h1>连接失败</h1><p>${error.message}</p><button class="primary" data-action="settings">检查设置</button></section>`);
+  }
+}
+
+async function renderLibrary(libraryId) {
+  state.currentView = "library";
+  state.activeLibrary = libraryId;
+  renderShell(`<section class="loading">正在展开媒体库...</section>`);
+  try {
+    const data = await window.wemby.items({ parentId: libraryId });
+    const library = state.home?.views?.find((item) => item.Id === libraryId);
+    renderShell(`
+      <section class="topbar">
+        <div>
+          <h1>${library?.Name || "媒体库"}</h1>
+          <p>${data.TotalRecordCount || data.Items?.length || 0} 个条目</p>
+        </div>
+        <button class="ghost" data-action="home">返回</button>
+      </section>
+      <section class="media-grid">${(data.Items || []).map(mediaCard).join("")}</section>
+    `);
+  } catch (error) {
+    renderShell(`<section class="empty-state"><h1>加载失败</h1><p>${error.message}</p></section>`);
+  }
+}
+
+function renderSearch() {
+  state.currentView = "search";
+  renderShell(`
+    <section class="search-view">
+      <form id="searchForm" class="search-box">
+        <input name="query" placeholder="搜索电影、剧集或单集" autofocus />
+        <button class="primary" type="submit">搜索</button>
+      </form>
+      <section id="searchResults" class="media-grid"></section>
+    </section>
+  `);
+}
+
+async function performSearch(query) {
+  const results = document.querySelector("#searchResults");
+  results.innerHTML = `<div class="loading inline">搜索中...</div>`;
+  try {
+    const data = await window.wemby.search({ query });
+    results.innerHTML = (data.Items || []).length
+      ? data.Items.map(mediaCard).join("")
+      : `<div class="empty-state compact"><h2>没有结果</h2><p>换个关键词试试。</p></div>`;
+  } catch (error) {
+    results.innerHTML = `<div class="empty-state compact"><h2>搜索失败</h2><p>${error.message}</p></div>`;
+  }
+}
+
+async function renderDetail(itemId) {
+  state.currentView = "detail";
+  renderShell(`<section class="loading">正在读取详情...</section>`);
+  try {
+    const item = await window.wemby.detail({ itemId });
+    state.activeItem = item;
+    state.episodes = [];
+    if (item.Type === "Series") {
+      const data = await window.wemby.episodes({ seriesId: item.Id });
+      state.episodes = data.Items || [];
+    }
+
+    const resumeTicks = item.UserData?.PlaybackPositionTicks || 0;
+    const background = item.BackdropImageUrl || item.ThumbImageUrl || item.PrimaryImageUrl || "";
+    renderShell(`
+      <section class="detail-hero" style="${background ? `background-image:linear-gradient(90deg, rgba(16,19,24,.98), rgba(16,19,24,.78), rgba(16,19,24,.48)), url('${background.replace(/'/g, "%27")}')` : ""}">
+        <button class="ghost back" data-action="back">返回</button>
+        <div class="detail-copy">
+          <span class="eyebrow">${item.Type || ""} ${item.ProductionYear || ""}</span>
+          <h1>${item.Name}</h1>
+          <p>${item.Overview || "暂无简介。"}</p>
+          <div class="detail-meta">
+            <span>${formatMinutes(item.RunTimeTicks)}</span>
+            ${item.Genres?.slice(0, 4).map((genre) => `<span>${genre}</span>`).join("") || ""}
+          </div>
+          <div class="actions">
+            ${item.Type !== "Series" ? `<button class="primary" data-play="${item.Id}" data-start="${resumeTicks}">${resumeTicks ? "继续播放" : "播放"}</button>` : ""}
+            ${resumeTicks && item.Type !== "Series" ? `<button class="ghost" data-play="${item.Id}" data-start="0">从头播放</button>` : ""}
+          </div>
+        </div>
+      </section>
+      ${state.episodes.length ? `
+        <section class="rail">
+          <div class="section-heading"><h2>剧集</h2></div>
+          <div class="episode-list">
+            ${state.episodes.map((episode) => `
+              <button class="episode" data-item="${episode.Id}">
+                <span>${episodeCode(episode)}</span>
+                <strong>${episode.Name}</strong>
+                <small>${formatMinutes(episode.RunTimeTicks)}</small>
+              </button>
+            `).join("")}
+          </div>
+        </section>
+      ` : ""}
+    `);
+  } catch (error) {
+    renderShell(`<section class="empty-state"><h1>详情加载失败</h1><p>${error.message}</p></section>`);
+  }
+}
+
+function renderSettings() {
+  state.currentView = "settings";
+  renderShell(`
+    <section class="settings-view">
+      <form id="settingsForm" class="form wide">
+        <h1>设置</h1>
+        <label>
+          <span>Emby 服务器</span>
+          <input name="server" value="${state.settings.server || ""}" placeholder="http://host:8096" />
+        </label>
+        <label>
+          <span>mpv.exe 路径</span>
+          <input name="mpvPath" value="${state.settings.mpvPath || ""}" placeholder="留空则自动查找 PATH 或 vendor/mpv/mpv.exe" />
+        </label>
+        <div class="form-actions">
+          <button class="primary" type="submit">保存</button>
+          <button class="ghost" type="button" data-action="detect-mpv">检测 mpv</button>
+          <button class="ghost" type="button" data-action="login">重新登录</button>
+        </div>
+      </form>
+    </section>
+  `);
+}
+
+async function play(itemId, startTicks = 0) {
+  setNotice("正在启动 mpv...");
+  try {
+    const result = await window.wemby.play({ itemId, startTicks: Number(startTicks || 0) });
+    setNotice(`已开始播放：${result.title}`, "success");
+    setTimeout(() => setNotice(""), 3000);
+  } catch (error) {
+    setNotice(error.message, "error");
+  }
+}
+
+async function loadSettings() {
+  state.settings = await window.wemby.getSettings();
+}
+
+appEl.addEventListener("click", async (event) => {
+  const actionButton = event.target.closest("[data-action]");
+  const mediaButton = event.target.closest("[data-item]");
+  const libraryButton = event.target.closest("[data-library]");
+  const playButton = event.target.closest("[data-play]");
+
+  if (playButton) {
+    await play(playButton.dataset.play, playButton.dataset.start);
+    return;
+  }
+
+  if (mediaButton) {
+    renderDetail(mediaButton.dataset.item);
+    return;
+  }
+
+  if (libraryButton) {
+    renderLibrary(libraryButton.dataset.library);
+    return;
+  }
+
+  if (!actionButton) return;
+  const action = actionButton.dataset.action;
+  if (action === "home" || action === "refresh") renderHome();
+  if (action === "search") renderSearch();
+  if (action === "settings") renderSettings();
+  if (action === "back") renderHome();
+  if (action === "login") renderLogin();
+  if (action === "detect-mpv") {
+    const found = await window.wemby.findMpv();
+    setNotice(found ? `找到 mpv：${found}` : "未找到 mpv，请填写 mpv.exe 路径。", found ? "success" : "warn");
+  }
+});
+
+appEl.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  if (form.id === "loginForm") {
+    setNotice("正在登录...");
+    try {
+      const result = await window.wemby.login(data);
+      state.settings = result.settings;
+      setNotice("登录成功", "success");
+      await renderHome();
+    } catch (error) {
+      setNotice(error.message, "error");
+    }
+  }
+
+  if (form.id === "searchForm") {
+    if (data.query?.trim()) performSearch(data.query.trim());
+  }
+
+  if (form.id === "settingsForm") {
+    state.settings = await window.wemby.saveSettings(data);
+    setNotice("设置已保存", "success");
+  }
+});
+
+window.wemby.onNotice((notice) => setNotice(notice.message, notice.type || "info"));
+
+loadSettings().then(() => {
+  if (state.settings?.accessToken) renderHome();
+  else renderLogin();
+});

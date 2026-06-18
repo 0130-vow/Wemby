@@ -1,0 +1,22 @@
+{
+  "name": "wemby",
+  "version": "0.1.0",
+  "description": "A personal Windows Emby client focused on fast launch, smooth playback, and MPV-powered seeking.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js"
+  },
+  "keywords": [
+    "emby",
+    "windows",
+    "mpv",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}
