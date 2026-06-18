@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+release/
 vendor/mpv/
 vendor/.downloads/
 vendor/.mpv-extract/

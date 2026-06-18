@@ -154,6 +154,7 @@ async function findMpv() {
   const candidates = [
     settings.mpvPath,
     userRuntimeMpvPath(),
+    process.resourcesPath ? path.join(process.resourcesPath, "vendor", "mpv", "mpv.exe") : null,
     path.join(app.getAppPath(), "vendor", "mpv", "mpv.exe"),
     path.join(process.cwd(), "vendor", "mpv", "mpv.exe")
   ].filter(Boolean);

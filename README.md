@@ -24,6 +24,23 @@ npm.cmd start
 npm.cmd run prepare-mpv
 ```
 
+## 打包和发布
+
+本地生成 Windows 安装包和 portable exe：
+
+```powershell
+npm.cmd run dist:win
+```
+
+产物会输出到 `release/`。发布 GitHub Release 时，推送一个版本 tag 即可触发自动构建和上传：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions 会生成 NSIS 安装包和 portable exe，并附加到 Release。
+
 ## mpv
 
 Wemby 会自动准备内置 mpv。安装依赖时会从 zhongfly/mpv-winbuild 的 GitHub Release 下载适合 Windows 的 mpv，并解压到项目内 `vendor/mpv/mpv.exe`。如果运行时仍没有找到 mpv，应用会再下载一份到用户数据目录作为兜底。
