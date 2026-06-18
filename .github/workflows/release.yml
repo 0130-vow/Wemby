@@ -31,7 +31,12 @@ jobs:
         run: npm run lint
 
       - name: Prepare bundled mpv
-        run: npm run prepare-mpv
+        shell: pwsh
+        env:
+          WEMBY_MPV_FETCH_TIMEOUT_MS: 60000
+        run: |
+          node scripts/ensure-mpv.js --optional
+          New-Item -ItemType Directory -Force vendor/mpv | Out-Null
 
       - name: Build Windows installer
         run: npm run build:win
