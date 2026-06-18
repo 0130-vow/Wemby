@@ -13,7 +13,8 @@ const state = {
     isPaused: false,
     volume: 100,
     isMuted: false,
-    speed: 1
+    speed: 1,
+    error: ""
   },
   returnItemId: null,
   isSeeking: false,
@@ -211,6 +212,7 @@ function updatePlayerChrome() {
   const volume = document.querySelector("#playerVolume");
   const speed = document.querySelector("#playerSpeed");
   const fill = document.querySelector("#playerProgressFill");
+  const host = document.querySelector("#playerHost");
   if (title) title.textContent = state.player.title || "正在启动播放";
   if (time) {
     time.textContent = `${formatClock(state.player.positionSeconds)} / ${formatClock(state.player.durationSeconds)}`;
@@ -229,6 +231,10 @@ function updatePlayerChrome() {
   }
   if (volume) volume.value = String(Math.round(state.player.volume ?? 100));
   if (speed) speed.value = String(state.player.speed || 1);
+  if (host && state.player.error) {
+    host.classList.add("error");
+    host.innerHTML = `<div class="player-error"><strong>播放启动失败</strong><span>${state.player.error}</span></div>`;
+  }
 }
 
 async function syncPlayerBounds() {
@@ -447,7 +453,8 @@ async function play(itemId, startTicks = 0) {
     isPaused: false,
     volume: 100,
     isMuted: false,
-    speed: 1
+    speed: 1,
+    error: ""
   };
   renderPlayerView(itemId);
   setNotice("正在启动 mpv...");
@@ -462,6 +469,9 @@ async function play(itemId, startTicks = 0) {
     setNotice(`已开始播放：${result.title}`, "success");
     setTimeout(() => setNotice(""), 3000);
   } catch (error) {
+    state.player.title = "播放启动失败";
+    state.player.error = error.message;
+    updatePlayerChrome();
     setNotice(error.message, "error");
   }
 }

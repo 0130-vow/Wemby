@@ -292,11 +292,64 @@ async function ensureMpv() {
   return mpvProvisionPromise;
 }
 
-function buildStreamUrl(itemId, mediaSourceId, startTicks = 0) {
+function compactPayload(payload) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
+}
+
+async function getPlaybackInfo(itemId, startTicks = 0) {
   const settings = readSettings();
-  return apiUrl(settings.server, `/Videos/${itemId}/stream`, {
-    static: "true",
-    MediaSourceId: mediaSourceId,
+  return embyFetch(`/Items/${itemId}/PlaybackInfo`, {
+    method: "POST",
+    params: {
+      UserId: settings.userId
+    },
+    body: {
+      UserId: settings.userId,
+      StartTimeTicks: startTicks || 0,
+      IsPlayback: true,
+      AutoOpenLiveStream: true
+    }
+  });
+}
+
+function appendAccessToken(urlString) {
+  const settings = readSettings();
+  let url;
+  if (/^https?:\/\//i.test(urlString)) {
+    url = new URL(urlString);
+  } else if (urlString.startsWith("/emby/")) {
+    url = new URL(urlString, normalizeServer(settings.server));
+  } else {
+    const relativePath = urlString.startsWith("/") ? urlString : `/${urlString}`;
+    url = new URL(apiUrl(settings.server, relativePath));
+  }
+  if (!url.searchParams.has("api_key")) {
+    url.searchParams.set("api_key", settings.accessToken);
+  }
+  return url.toString();
+}
+
+function mediaSourceContainer(mediaSource) {
+  return (mediaSource?.Container || "")
+    .split(",")
+    .map((part) => part.trim().toLowerCase().replace(/[^a-z0-9]/g, ""))
+    .find(Boolean);
+}
+
+function buildStreamUrl(itemId, mediaSource, playSessionId, startTicks = 0) {
+  const settings = readSettings();
+  if (mediaSource?.DirectStreamUrl) {
+    return appendAccessToken(mediaSource.DirectStreamUrl);
+  }
+
+  const container = mediaSourceContainer(mediaSource);
+  const streamPath = container ? `/Videos/${itemId}/stream.${container}` : `/Videos/${itemId}/stream`;
+  return apiUrl(settings.server, streamPath, {
+    Static: "true",
+    MediaSourceId: mediaSource?.Id,
+    PlaySessionId: playSessionId,
     api_key: settings.accessToken,
     StartTimeTicks: startTicks || undefined
   });
@@ -309,7 +362,9 @@ async function sendPlaybackEvent(kind, payload) {
       progress: "/Sessions/Playing/Progress",
       stopped: "/Sessions/Playing/Stopped"
     };
-    await embyFetch(map[kind], { method: "POST", body: payload });
+    const body = compactPayload(payload);
+    if (!body.ItemId || !body.PlaySessionId) return;
+    await embyFetch(map[kind], { method: "POST", body });
   } catch (error) {
     mainWindow?.webContents.send("app:notice", {
       type: "warn",
@@ -473,14 +528,30 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
     throw new Error("当前条目不是可直接播放的视频，请打开剧集或电影条目。");
   }
 
-  const mediaSource = item.MediaSources?.[0];
-  const mediaSourceId = mediaSource?.Id || item.Id;
-  const mpvPath = await ensureMpv();
-  if (!mpvPath) {
-    throw new Error("没有找到 mpv.exe，也无法自动准备内置 mpv。");
-  }
+  try {
+    const mpvPath = await ensureMpv();
+    if (!mpvPath) {
+      throw new Error("没有找到 mpv.exe，也无法自动准备内置 mpv。");
+    }
 
-  stopActivePlayback();
+    let playbackInfo = {};
+    try {
+      playbackInfo = await getPlaybackInfo(item.Id, startTicks);
+    } catch (error) {
+      notify("warn", `获取 PlaybackInfo 失败，尝试直接播放：${error.message}`);
+    }
+
+    const mediaSources = playbackInfo.MediaSources?.length ? playbackInfo.MediaSources : item.MediaSources || [];
+    const mediaSource = mediaSources.find((source) => source.SupportsDirectPlay !== false) || mediaSources[0];
+    if (!mediaSource) {
+      throw new Error("Emby 没有返回可播放媒体源。请确认该条目有可用文件或流。");
+    }
+
+    const mediaSourceId = mediaSource.Id || item.Id;
+    const playSessionId = playbackInfo.PlaySessionId || null;
+    const canReportPlayback = Boolean(playSessionId);
+
+    stopActivePlayback();
 
   let embeddedWindowId = null;
   if (hostBounds) {
@@ -491,7 +562,7 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
 
   const pipeName = `wemby-${process.pid}-${Date.now()}`;
   const pipePath = process.platform === "win32" ? `\\\\.\\pipe\\${pipeName}` : path.join(os.tmpdir(), pipeName);
-  const streamUrl = buildStreamUrl(item.Id, mediaSourceId, startTicks);
+  const streamUrl = buildStreamUrl(item.Id, mediaSource, playSessionId, startTicks);
   const title = item.SeriesName
     ? `${item.SeriesName} S${String(item.ParentIndexNumber || 0).padStart(2, "0")}E${String(item.IndexNumber || 0).padStart(2, "0")} ${item.Name}`
     : item.Name;
@@ -516,15 +587,23 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
 
   const child = spawn(mpvPath, args, {
     detached: false,
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: Boolean(embeddedWindowId)
   });
+  let mpvLog = "";
+  const appendMpvLog = (chunk) => {
+    mpvLog = `${mpvLog}${chunk.toString("utf8")}`.slice(-4000);
+  };
+  child.stdout?.on("data", appendMpvLog);
+  child.stderr?.on("data", appendMpvLog);
 
-  const playback = {
-    itemId: item.Id,
-    mediaSourceId,
-    title,
-    process: child,
+    const playback = {
+      itemId: item.Id,
+      mediaSourceId,
+      playSessionId,
+      canReportPlayback,
+      title,
+      process: child,
     embedded: Boolean(embeddedWindowId),
     positionSeconds: startTicks / 10000000,
     durationSeconds: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
@@ -538,13 +617,16 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
   activePlayback = playback;
   notifyPlayerState();
 
-  await sendPlaybackEvent("start", {
-    ItemId: item.Id,
-    MediaSourceId: mediaSourceId,
-    PlayMethod: "DirectStream",
-    CanSeek: true,
-    PositionTicks: startTicks
-  });
+    if (playback.canReportPlayback) {
+      await sendPlaybackEvent("start", {
+        ItemId: item.Id,
+        MediaSourceId: mediaSourceId,
+        PlaySessionId: playSessionId,
+        PlayMethod: "DirectStream",
+        CanSeek: true,
+        PositionTicks: startTicks
+      });
+    }
 
   attachMpvIpc(pipePath, playback).catch(() => {
     mainWindow?.webContents.send("app:notice", {
@@ -554,30 +636,45 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
   });
 
   playback.progressTimer = setInterval(() => {
-    sendPlaybackEvent("progress", {
-      ItemId: playback.itemId,
-      MediaSourceId: playback.mediaSourceId,
-      PlayMethod: "DirectStream",
-      CanSeek: true,
-      IsPaused: playback.isPaused,
-      PositionTicks: ticksFromSeconds(playback.positionSeconds)
-    });
+    if (playback.canReportPlayback) {
+      sendPlaybackEvent("progress", {
+        ItemId: playback.itemId,
+        MediaSourceId: playback.mediaSourceId,
+        PlaySessionId: playback.playSessionId,
+        PlayMethod: "DirectStream",
+        CanSeek: true,
+        IsPaused: playback.isPaused,
+        PositionTicks: ticksFromSeconds(playback.positionSeconds)
+      });
+    }
   }, 10000);
 
-  child.once("exit", () => {
+  child.once("exit", (code, signal) => {
     clearInterval(playback.progressTimer);
     playback.socket?.destroy();
     if (playback.embedded && activePlayback === playback) destroyPlayerWindow();
-    sendPlaybackEvent("stopped", {
-      ItemId: playback.itemId,
-      MediaSourceId: playback.mediaSourceId,
-      PositionTicks: ticksFromSeconds(playback.positionSeconds)
-    });
+    if (playback.canReportPlayback) {
+      sendPlaybackEvent("stopped", {
+        ItemId: playback.itemId,
+        MediaSourceId: playback.mediaSourceId,
+        PlaySessionId: playback.playSessionId,
+        PositionTicks: ticksFromSeconds(playback.positionSeconds)
+      });
+    }
     if (activePlayback === playback) activePlayback = null;
-    notifyPlayerState({ active: false });
+    const failedBeforeProgress = playback.positionSeconds < 1 && code && code !== 0;
+    if (failedBeforeProgress) {
+      notify("error", `mpv 启动失败：${mpvLog.trim() || `退出码 ${code}${signal ? `，信号 ${signal}` : ""}`}`);
+    }
+    notifyPlayerState({ active: false, error: failedBeforeProgress ? mpvLog.trim() : "" });
   });
 
-  return { ok: true, title };
+    return { ok: true, title, streamUrl };
+  } catch (error) {
+    destroyPlayerWindow();
+    notifyPlayerState({ active: false, error: error.message });
+    throw error;
+  }
 }
 
 function createWindow() {

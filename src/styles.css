@@ -1124,6 +1124,36 @@ input {
   min-height: 500px;
 }
 
+.player-host.error {
+  color: #f5d3d3;
+  background:
+    linear-gradient(135deg, rgba(216, 64, 64, .12), transparent 44%),
+    #050608;
+}
+
+.player-error {
+  max-width: min(760px, 86%);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid rgba(216, 64, 64, .36);
+  border-radius: 8px;
+  background: rgba(16, 18, 24, .86);
+  text-align: left;
+}
+
+.player-error strong {
+  font-size: 20px;
+  color: #fff;
+}
+
+.player-error span {
+  color: #f2c8c8;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .player-controls {
   grid-template-columns: 82px 92px 82px 98px minmax(120px, 1fr) 180px 92px 82px 84px;
   background: rgba(18, 23, 30, .92);
