@@ -12,5 +12,10 @@ contextBridge.exposeInMainWorld("wemby", {
   detail: (payload) => ipcRenderer.invoke("emby:detail", payload),
   episodes: (payload) => ipcRenderer.invoke("emby:episodes", payload),
   play: (payload) => ipcRenderer.invoke("player:play", payload),
+  setPlayerBounds: (bounds) => ipcRenderer.invoke("player:setBounds", bounds),
+  playerCommand: (payload) => ipcRenderer.invoke("player:command", payload),
+  stopPlayer: () => ipcRenderer.invoke("player:stop"),
+  getPlayerState: () => ipcRenderer.invoke("player:getState"),
+  onPlayerState: (handler) => ipcRenderer.on("player:state", (_event, state) => handler(state)),
   onNotice: (handler) => ipcRenderer.on("app:notice", (_event, notice) => handler(notice))
 });

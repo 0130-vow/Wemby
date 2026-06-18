@@ -26,6 +26,8 @@ const ITEM_FIELDS = [
 
 let mainWindow;
 let activePlayback = null;
+let playerWindow = null;
+let lastPlayerHostBounds = null;
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -194,6 +196,96 @@ function ticksFromSeconds(seconds) {
   return Math.max(0, Math.round((seconds || 0) * 10000000));
 }
 
+function nativeWindowHandleToString(buffer) {
+  if (process.platform === "win32" && buffer.length >= 8) {
+    return buffer.readBigUInt64LE(0).toString();
+  }
+  return String(buffer.readUInt32LE(0));
+}
+
+function notifyPlayerState(extra = {}) {
+  if (!mainWindow) return;
+  mainWindow.webContents.send("player:state", {
+    active: Boolean(activePlayback?.process && !activePlayback.process.killed),
+    itemId: activePlayback?.itemId || null,
+    title: activePlayback?.title || "",
+    positionSeconds: activePlayback?.positionSeconds || 0,
+    durationSeconds: activePlayback?.durationSeconds || 0,
+    isPaused: Boolean(activePlayback?.isPaused),
+    embedded: Boolean(activePlayback?.embedded),
+    ...extra
+  });
+}
+
+function ensurePlayerWindow() {
+  if (playerWindow && !playerWindow.isDestroyed()) return playerWindow;
+
+  playerWindow = new BrowserWindow({
+    parent: mainWindow,
+    width: 640,
+    height: 360,
+    frame: false,
+    show: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    backgroundColor: "#000000",
+    title: "Wemby Player",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  playerWindow.loadURL("data:text/html,<html><body style='margin:0;background:#000'></body></html>");
+  playerWindow.on("closed", () => {
+    playerWindow = null;
+  });
+  return playerWindow;
+}
+
+function setPlayerWindowBounds(rect) {
+  if (!rect || !mainWindow || mainWindow.isDestroyed()) return;
+  lastPlayerHostBounds = rect;
+  const win = ensurePlayerWindow();
+  const content = mainWindow.getContentBounds();
+  const bounds = {
+    x: Math.round(content.x + Number(rect.x || 0)),
+    y: Math.round(content.y + Number(rect.y || 0)),
+    width: Math.max(80, Math.round(Number(rect.width || 0))),
+    height: Math.max(45, Math.round(Number(rect.height || 0)))
+  };
+  win.setBounds(bounds, false);
+  if (!win.isVisible()) win.showInactive();
+}
+
+function destroyPlayerWindow() {
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.destroy();
+  }
+  playerWindow = null;
+  lastPlayerHostBounds = null;
+}
+
+function sendMpvCommand(command) {
+  if (!activePlayback?.socket || activePlayback.socket.destroyed) return false;
+  activePlayback.socket.write(`${JSON.stringify({ command })}\n`);
+  return true;
+}
+
+function stopActivePlayback() {
+  if (activePlayback?.process && !activePlayback.process.killed) {
+    activePlayback.process.kill();
+    return true;
+  }
+  destroyPlayerWindow();
+  notifyPlayerState({ active: false });
+  return false;
+}
+
 async function attachMpvIpc(pipePath, playback) {
   let tries = 0;
   const socket = new net.Socket();
@@ -229,6 +321,7 @@ async function attachMpvIpc(pipePath, playback) {
           if (event.name === "time-pos") playback.positionSeconds = Number(event.data || 0);
           if (event.name === "duration") playback.durationSeconds = Number(event.data || 0);
           if (event.name === "pause") playback.isPaused = Boolean(event.data);
+          notifyPlayerState();
         }
       } catch {
         // Ignore noisy IPC lines from mpv.
@@ -237,9 +330,10 @@ async function attachMpvIpc(pipePath, playback) {
   });
 
   playback.socket = socket;
+  notifyPlayerState();
 }
 
-async function playWithMpv(item, startTicks = 0) {
+async function playWithMpv(item, startTicks = 0, hostBounds = null) {
   if (!DIRECT_TYPES.includes(item.Type)) {
     throw new Error("当前条目不是可直接播放的视频，请打开剧集或电影条目。");
   }
@@ -251,8 +345,13 @@ async function playWithMpv(item, startTicks = 0) {
     throw new Error("没有找到 mpv.exe。请安装 mpv，或在设置里填写 mpv.exe 的完整路径。");
   }
 
-  if (activePlayback?.process && !activePlayback.process.killed) {
-    activePlayback.process.kill();
+  stopActivePlayback();
+
+  let embeddedWindowId = null;
+  if (hostBounds) {
+    const win = ensurePlayerWindow();
+    setPlayerWindowBounds(hostBounds);
+    embeddedWindowId = nativeWindowHandleToString(win.getNativeWindowHandle());
   }
 
   const pipeName = `wemby-${process.pid}-${Date.now()}`;
@@ -273,21 +372,25 @@ async function playWithMpv(item, startTicks = 0) {
     "--demuxer-readahead-secs=60",
     "--hr-seek=yes",
     "--keep-open=no",
+    "--no-terminal",
     `--title=${title}`,
     `--input-ipc-server=${pipePath}`,
     `--user-agent=${APP_NAME}/${CLIENT_VERSION}`
   ];
+  if (embeddedWindowId) args.push(`--wid=${embeddedWindowId}`);
 
   const child = spawn(mpvPath, args, {
     detached: false,
     stdio: "ignore",
-    windowsHide: false
+    windowsHide: Boolean(embeddedWindowId)
   });
 
   const playback = {
     itemId: item.Id,
     mediaSourceId,
+    title,
     process: child,
+    embedded: Boolean(embeddedWindowId),
     positionSeconds: startTicks / 10000000,
     durationSeconds: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
     isPaused: false,
@@ -295,6 +398,7 @@ async function playWithMpv(item, startTicks = 0) {
     socket: null
   };
   activePlayback = playback;
+  notifyPlayerState();
 
   await sendPlaybackEvent("start", {
     ItemId: item.Id,
@@ -325,12 +429,14 @@ async function playWithMpv(item, startTicks = 0) {
   child.once("exit", () => {
     clearInterval(playback.progressTimer);
     playback.socket?.destroy();
+    if (playback.embedded && activePlayback === playback) destroyPlayerWindow();
     sendPlaybackEvent("stopped", {
       ItemId: playback.itemId,
       MediaSourceId: playback.mediaSourceId,
       PositionTicks: ticksFromSeconds(playback.positionSeconds)
     });
     if (activePlayback === playback) activePlayback = null;
+    notifyPlayerState({ active: false });
   });
 
   return { ok: true, title };
@@ -353,6 +459,12 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
+  mainWindow.on("move", () => {
+    if (lastPlayerHostBounds) setPlayerWindowBounds(lastPlayerHostBounds);
+  });
+  mainWindow.on("resize", () => {
+    if (lastPlayerHostBounds) setPlayerWindowBounds(lastPlayerHostBounds);
+  });
 }
 
 app.whenReady().then(() => {
@@ -476,13 +588,40 @@ app.whenReady().then(() => {
     return { ...data, Items: (data.Items || []).map(enrichItem) };
   });
 
-  ipcMain.handle("player:play", async (_event, { itemId, startTicks = 0 }) => {
+  ipcMain.handle("player:play", async (_event, { itemId, startTicks = 0, hostBounds = null }) => {
     const settings = readSettings();
     const item = await embyFetch(`/Users/${settings.userId}/Items/${itemId}`, {
       params: { Fields: ITEM_FIELDS }
     });
-    return playWithMpv(item, startTicks);
+    return playWithMpv(item, startTicks, hostBounds);
   });
+
+  ipcMain.handle("player:setBounds", (_event, bounds) => {
+    setPlayerWindowBounds(bounds);
+    return { ok: true };
+  });
+
+  ipcMain.handle("player:command", (_event, { action, value } = {}) => {
+    if (action === "togglePause") return { ok: sendMpvCommand(["cycle", "pause"]) };
+    if (action === "seek") return { ok: sendMpvCommand(["seek", Number(value || 0), "relative+exact"]) };
+    if (action === "stop") return { ok: stopActivePlayback() };
+    return { ok: false };
+  });
+
+  ipcMain.handle("player:stop", () => {
+    stopActivePlayback();
+    return { ok: true };
+  });
+
+  ipcMain.handle("player:getState", () => ({
+    active: Boolean(activePlayback?.process && !activePlayback.process.killed),
+    itemId: activePlayback?.itemId || null,
+    title: activePlayback?.title || "",
+    positionSeconds: activePlayback?.positionSeconds || 0,
+    durationSeconds: activePlayback?.durationSeconds || 0,
+    isPaused: Boolean(activePlayback?.isPaused),
+    embedded: Boolean(activePlayback?.embedded)
+  }));
 
   createWindow();
 

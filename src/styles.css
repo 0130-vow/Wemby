@@ -215,6 +215,11 @@ input:focus {
   background: #54d5aa;
 }
 
+.danger:hover {
+  border-color: rgba(239, 68, 68, .75);
+  background: rgba(239, 68, 68, .14);
+}
+
 .form-actions,
 .actions {
   display: flex;
@@ -432,4 +437,43 @@ input:focus {
 
 .inline {
   min-height: 120px;
+}
+
+.player-topbar {
+  margin-bottom: 16px;
+}
+
+.embedded-player {
+  display: grid;
+  gap: 12px;
+}
+
+.player-host {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 8px;
+  background: #000;
+  color: #738196;
+}
+
+.player-controls {
+  display: grid;
+  grid-template-columns: 96px 96px 96px 1fr 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 8px;
+  background: #171d25;
+}
+
+.player-time {
+  justify-self: end;
+  color: #b7c4d4;
+  font-variant-numeric: tabular-nums;
 }

@@ -5,6 +5,14 @@ const state = {
   activeLibrary: null,
   activeItem: null,
   episodes: [],
+  player: {
+    active: false,
+    title: "",
+    positionSeconds: 0,
+    durationSeconds: 0,
+    isPaused: false
+  },
+  returnItemId: null,
   loading: false
 };
 
@@ -15,6 +23,17 @@ function formatMinutes(ticks) {
   const minutes = Math.round(ticks / 10000000 / 60);
   if (minutes < 60) return `${minutes} 分钟`;
   return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+}
+
+function formatClock(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
 function episodeCode(item) {
@@ -116,6 +135,64 @@ function renderRail(title, items = []) {
       <div class="media-row">${items.map(mediaCard).join("")}</div>
     </section>
   `;
+}
+
+function getPlayerHostBounds() {
+  const host = document.querySelector("#playerHost");
+  if (!host) return null;
+  const rect = host.getBoundingClientRect();
+  return {
+    x: rect.left,
+    y: rect.top,
+    width: rect.width,
+    height: rect.height
+  };
+}
+
+function updatePlayerChrome() {
+  const title = document.querySelector("#playerTitle");
+  const time = document.querySelector("#playerTime");
+  const pause = document.querySelector("[data-player-command='togglePause']");
+  if (title) title.textContent = state.player.title || "正在启动播放";
+  if (time) {
+    time.textContent = `${formatClock(state.player.positionSeconds)} / ${formatClock(state.player.durationSeconds)}`;
+  }
+  if (pause) pause.textContent = state.player.isPaused ? "继续" : "暂停";
+}
+
+async function syncPlayerBounds() {
+  if (state.currentView !== "player") return;
+  const bounds = getPlayerHostBounds();
+  if (bounds) await window.wemby.setPlayerBounds(bounds);
+}
+
+function renderPlayerView(itemId) {
+  state.currentView = "player";
+  renderShell(`
+    <section class="topbar player-topbar">
+      <div>
+        <h1 id="playerTitle">${state.player.title || "正在启动播放"}</h1>
+        <p>mpv 内嵌播放，视频解码和拖动仍交给 mpv 处理。</p>
+      </div>
+      <button class="ghost" data-action="close-player">关闭播放</button>
+    </section>
+    <section class="embedded-player" data-playing-item="${itemId}">
+      <div id="playerHost" class="player-host">
+        <span>正在准备 mpv 画面...</span>
+      </div>
+      <div class="player-controls">
+        <button class="ghost" data-player-command="seek" data-value="-10">-10 秒</button>
+        <button class="primary" data-player-command="togglePause">暂停</button>
+        <button class="ghost" data-player-command="seek" data-value="30">+30 秒</button>
+        <span id="playerTime" class="player-time">0:00 / 0:00</span>
+        <button class="ghost danger" data-action="close-player">停止</button>
+      </div>
+    </section>
+  `);
+  requestAnimationFrame(() => {
+    syncPlayerBounds();
+    updatePlayerChrome();
+  });
 }
 
 async function renderHome() {
@@ -271,9 +348,24 @@ function renderSettings() {
 }
 
 async function play(itemId, startTicks = 0) {
+  state.returnItemId = state.activeItem?.Id || null;
+  state.player = {
+    active: true,
+    title: "正在启动播放",
+    positionSeconds: 0,
+    durationSeconds: 0,
+    isPaused: false
+  };
+  renderPlayerView(itemId);
   setNotice("正在启动 mpv...");
   try {
-    const result = await window.wemby.play({ itemId, startTicks: Number(startTicks || 0) });
+    const result = await window.wemby.play({
+      itemId,
+      startTicks: Number(startTicks || 0),
+      hostBounds: getPlayerHostBounds()
+    });
+    state.player.title = result.title;
+    updatePlayerChrome();
     setNotice(`已开始播放：${result.title}`, "success");
     setTimeout(() => setNotice(""), 3000);
   } catch (error) {
@@ -290,6 +382,15 @@ appEl.addEventListener("click", async (event) => {
   const mediaButton = event.target.closest("[data-item]");
   const libraryButton = event.target.closest("[data-library]");
   const playButton = event.target.closest("[data-play]");
+  const playerCommand = event.target.closest("[data-player-command]");
+
+  if (playerCommand) {
+    await window.wemby.playerCommand({
+      action: playerCommand.dataset.playerCommand,
+      value: playerCommand.dataset.value
+    });
+    return;
+  }
 
   if (playButton) {
     await play(playButton.dataset.play, playButton.dataset.start);
@@ -308,11 +409,19 @@ appEl.addEventListener("click", async (event) => {
 
   if (!actionButton) return;
   const action = actionButton.dataset.action;
+  if (state.currentView === "player" && ["home", "search", "settings", "login", "back"].includes(action)) {
+    await window.wemby.stopPlayer();
+  }
   if (action === "home" || action === "refresh") renderHome();
   if (action === "search") renderSearch();
   if (action === "settings") renderSettings();
   if (action === "back") renderHome();
   if (action === "login") renderLogin();
+  if (action === "close-player") {
+    await window.wemby.stopPlayer();
+    if (state.returnItemId) renderDetail(state.returnItemId);
+    else renderHome();
+  }
   if (action === "detect-mpv") {
     const found = await window.wemby.findMpv();
     setNotice(found ? `找到 mpv：${found}` : "未找到 mpv，请填写 mpv.exe 路径。", found ? "success" : "warn");
@@ -346,7 +455,19 @@ appEl.addEventListener("submit", async (event) => {
   }
 });
 
+window.addEventListener("resize", () => {
+  syncPlayerBounds();
+});
+
+window.addEventListener("scroll", () => {
+  syncPlayerBounds();
+}, true);
+
 window.wemby.onNotice((notice) => setNotice(notice.message, notice.type || "info"));
+window.wemby.onPlayerState((playerState) => {
+  state.player = { ...state.player, ...playerState };
+  updatePlayerChrome();
+});
 
 loadSettings().then(() => {
   if (state.settings?.accessToken) renderHome();
