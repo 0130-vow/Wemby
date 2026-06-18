@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("wemby", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   findMpv: () => ipcRenderer.invoke("system:findMpv"),
+  ensureMpv: () => ipcRenderer.invoke("system:ensureMpv"),
   openExternal: (url) => ipcRenderer.invoke("system:openExternal", url),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggleMaximize"),

@@ -28,6 +28,7 @@ let mainWindow;
 let activePlayback = null;
 let playerWindow = null;
 let lastPlayerHostBounds = null;
+let mpvProvisionPromise = null;
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -140,10 +141,19 @@ function enrichItem(item) {
   };
 }
 
+function userRuntimeMpvPath() {
+  return path.join(app.getPath("userData"), "runtime", "mpv", "mpv.exe");
+}
+
+function notify(type, message) {
+  mainWindow?.webContents.send("app:notice", { type, message });
+}
+
 async function findMpv() {
   const settings = readSettings();
   const candidates = [
     settings.mpvPath,
+    userRuntimeMpvPath(),
     path.join(app.getAppPath(), "vendor", "mpv", "mpv.exe"),
     path.join(process.cwd(), "vendor", "mpv", "mpv.exe")
   ].filter(Boolean);
@@ -164,6 +174,122 @@ async function findMpv() {
   }
 
   return null;
+}
+
+function isInside(parent, target) {
+  const relative = path.relative(parent, target);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function downloadFile(url, targetPath) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": `${APP_NAME}/${CLIENT_VERSION}`,
+      "Accept": "application/octet-stream"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`下载 mpv 失败：HTTP ${response.status}`);
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(targetPath, buffer);
+}
+
+async function extractArchive(archivePath, destination) {
+  fs.mkdirSync(destination, { recursive: true });
+  await new Promise((resolve, reject) => {
+    execFile("tar", ["-xf", archivePath, "-C", destination], { windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`解压 mpv 失败：${stderr || error.message}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
+function findFileRecursive(root, fileName) {
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) return fullPath;
+    if (entry.isDirectory()) {
+      const found = findFileRecursive(fullPath, fileName);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function selectMpvAsset(assets) {
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  const exact = new RegExp(`^mpv-${arch}-\\\\d{8}-git-[a-z0-9]+\\\\.7z$`, "i");
+  return assets.find((asset) => exact.test(asset.name))
+    || assets.find((asset) => asset.name.startsWith(`mpv-${arch}-`) && asset.name.endsWith(".7z") && !asset.name.includes("debug") && !asset.name.includes("dev") && !asset.name.includes("-v3-"));
+}
+
+async function downloadBundledMpv() {
+  const existing = await findMpv();
+  if (existing) return existing;
+
+  notify("info", "首次播放正在准备内置 mpv，请稍等...");
+  const releaseResponse = await fetch("https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest", {
+    headers: {
+      "User-Agent": `${APP_NAME}/${CLIENT_VERSION}`,
+      "Accept": "application/vnd.github+json"
+    }
+  });
+  if (!releaseResponse.ok) {
+    throw new Error(`获取 mpv 下载信息失败：HTTP ${releaseResponse.status}`);
+  }
+
+  const release = await releaseResponse.json();
+  const asset = selectMpvAsset(release.assets || []);
+  if (!asset?.browser_download_url) {
+    throw new Error("没有找到适合当前系统的 mpv Windows 构建。");
+  }
+
+  const runtimeRoot = path.join(app.getPath("userData"), "runtime");
+  const downloadPath = path.join(runtimeRoot, "downloads", asset.name);
+  const extractRoot = path.join(runtimeRoot, "mpv-extract");
+  const targetRoot = path.dirname(userRuntimeMpvPath());
+
+  for (const target of [extractRoot, targetRoot]) {
+    if (fs.existsSync(target)) {
+      if (!isInside(app.getPath("userData"), target)) throw new Error(`拒绝清理异常路径：${target}`);
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  }
+
+  notify("info", `正在下载内置 mpv：${asset.name}`);
+  await downloadFile(asset.browser_download_url, downloadPath);
+  notify("info", "正在解压内置 mpv...");
+  await extractArchive(downloadPath, extractRoot);
+
+  const extractedMpv = findFileRecursive(extractRoot, "mpv.exe");
+  if (!extractedMpv) throw new Error("mpv 下载完成，但压缩包里没有找到 mpv.exe。");
+
+  fs.mkdirSync(targetRoot, { recursive: true });
+  fs.cpSync(path.dirname(extractedMpv), targetRoot, { recursive: true });
+  if (!fs.existsSync(userRuntimeMpvPath())) {
+    throw new Error("mpv 已解压，但安装目录里没有找到 mpv.exe。");
+  }
+
+  saveSettings({ bundledMpvPath: userRuntimeMpvPath(), bundledMpvVersion: release.tag_name });
+  notify("success", "内置 mpv 已准备好，正在启动播放。");
+  return userRuntimeMpvPath();
+}
+
+async function ensureMpv() {
+  const existing = await findMpv();
+  if (existing) return existing;
+  if (!mpvProvisionPromise) {
+    mpvProvisionPromise = downloadBundledMpv().finally(() => {
+      mpvProvisionPromise = null;
+    });
+  }
+  return mpvProvisionPromise;
 }
 
 function buildStreamUrl(itemId, mediaSourceId, startTicks = 0) {
@@ -340,9 +466,9 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
 
   const mediaSource = item.MediaSources?.[0];
   const mediaSourceId = mediaSource?.Id || item.Id;
-  const mpvPath = await findMpv();
+  const mpvPath = await ensureMpv();
   if (!mpvPath) {
-    throw new Error("没有找到 mpv.exe。请安装 mpv，或在设置里填写 mpv.exe 的完整路径。");
+    throw new Error("没有找到 mpv.exe，也无法自动准备内置 mpv。");
   }
 
   stopActivePlayback();
@@ -473,6 +599,7 @@ app.whenReady().then(() => {
   ipcMain.handle("settings:save", (_event, settings) => saveSettings(settings));
   ipcMain.handle("system:openExternal", (_event, url) => shell.openExternal(url));
   ipcMain.handle("system:findMpv", () => findMpv());
+  ipcMain.handle("system:ensureMpv", () => ensureMpv());
   ipcMain.handle("window:minimize", () => {
     mainWindow?.minimize();
     return { ok: true };

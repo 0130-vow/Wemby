@@ -20,13 +20,16 @@ npm.cmd start
 
 ## mpv
 
-应用会按以下顺序查找 mpv：
+Wemby 会自动准备内置 mpv。首次播放时如果没有找到本机 mpv，会从 zhongfly/mpv-winbuild 的 GitHub Release 下载适合 Windows 的 mpv，并解压到应用用户数据目录。
+
+应用查找 mpv 的顺序：
 
 1. 设置页填写的 `mpv.exe` 完整路径
-2. `vendor/mpv/mpv.exe`
-3. 系统 `PATH` 中的 `mpv.exe`
+2. Wemby 自动准备的内置 mpv
+3. `vendor/mpv/mpv.exe`
+4. 系统 `PATH` 中的 `mpv.exe`
 
-没有安装 mpv 时，先下载 Windows 版 mpv，或者把便携版放到 `vendor/mpv/mpv.exe`。
+设置页里的 mpv 路径通常可以留空；只有你想指定自己的 mpv 版本时才需要填写。
 
 ## 第一版能力
 

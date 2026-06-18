@@ -384,11 +384,11 @@ function renderSettings() {
         </label>
         <label>
           <span>mpv.exe 路径</span>
-          <input name="mpvPath" value="${state.settings.mpvPath || ""}" placeholder="留空则自动查找 PATH 或 vendor/mpv/mpv.exe" />
+          <input name="mpvPath" value="${state.settings.mpvPath || ""}" placeholder="通常留空；Wemby 会自动下载内置 mpv" />
         </label>
         <div class="form-actions">
           <button class="primary" type="submit">保存</button>
-          <button class="ghost" type="button" data-action="detect-mpv">检测 mpv</button>
+          <button class="ghost" type="button" data-action="detect-mpv">检测/准备 mpv</button>
           <button class="ghost" type="button" data-action="login">重新登录</button>
         </div>
       </form>
@@ -481,8 +481,13 @@ appEl.addEventListener("click", async (event) => {
     else renderHome();
   }
   if (action === "detect-mpv") {
-    const found = await window.wemby.findMpv();
-    setNotice(found ? `找到 mpv：${found}` : "未找到 mpv，请填写 mpv.exe 路径。", found ? "success" : "warn");
+    setNotice("正在检测 mpv...");
+    try {
+      const found = await window.wemby.ensureMpv();
+      setNotice(found ? `mpv 已就绪：${found}` : "mpv 尚未就绪。", found ? "success" : "warn");
+    } catch (error) {
+      setNotice(error.message, "error");
+    }
   }
 });
 
