@@ -707,6 +707,7 @@ button {
   justify-content: space-between;
   gap: 18px;
   padding: 0 34px;
+  -webkit-app-region: drag;
 }
 
 .app-title {
@@ -728,6 +729,7 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .icon-button {
@@ -754,6 +756,72 @@ button {
   color: #07100c;
   background: linear-gradient(135deg, #dfffe7, var(--green));
   font-weight: 800;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.window-button {
+  position: relative;
+  width: 38px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  color: #d8e1ec;
+  background: transparent;
+}
+
+.window-button::before,
+.window-button::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.window-button::before {
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.window-button.maximize::before {
+  width: 12px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.window-button.close::before,
+.window-button.close::after {
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.window-button.close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.window-button.close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.window-button:hover {
+  background: rgba(255, 255, 255, .09);
+}
+
+.window-button.close:hover {
+  color: #fff;
+  background: #d84040;
 }
 
 .content {

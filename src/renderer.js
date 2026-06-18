@@ -87,6 +87,11 @@ function renderShell(content) {
             <button class="icon-button" data-action="search" title="搜索" aria-label="搜索"><span class="search-icon"></span></button>
             <button class="icon-button" data-action="settings" title="设置" aria-label="设置"><span class="settings-icon"></span></button>
             <span class="avatar">${(state.settings.userName || state.settings.username || "W").slice(0, 1).toUpperCase()}</span>
+            <span class="window-controls" aria-label="窗口控制">
+              <button class="window-button" data-window-action="minimize" title="最小化" aria-label="最小化"></button>
+              <button class="window-button maximize" data-window-action="toggleMaximize" title="最大化" aria-label="最大化"></button>
+              <button class="window-button close" data-window-action="close" title="关闭" aria-label="关闭"></button>
+            </span>
           </div>
         </header>
         <div class="notice" hidden></div>
@@ -427,6 +432,15 @@ appEl.addEventListener("click", async (event) => {
   const libraryButton = event.target.closest("[data-library]");
   const playButton = event.target.closest("[data-play]");
   const playerCommand = event.target.closest("[data-player-command]");
+  const windowAction = event.target.closest("[data-window-action]");
+
+  if (windowAction) {
+    const action = windowAction.dataset.windowAction;
+    if (action === "minimize") await window.wemby.minimizeWindow();
+    if (action === "toggleMaximize") await window.wemby.toggleMaximizeWindow();
+    if (action === "close") await window.wemby.closeWindow();
+    return;
+  }
 
   if (playerCommand) {
     await window.wemby.playerCommand({

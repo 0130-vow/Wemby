@@ -450,6 +450,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: "#101318",
     title: APP_NAME,
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -472,6 +473,20 @@ app.whenReady().then(() => {
   ipcMain.handle("settings:save", (_event, settings) => saveSettings(settings));
   ipcMain.handle("system:openExternal", (_event, url) => shell.openExternal(url));
   ipcMain.handle("system:findMpv", () => findMpv());
+  ipcMain.handle("window:minimize", () => {
+    mainWindow?.minimize();
+    return { ok: true };
+  });
+  ipcMain.handle("window:toggleMaximize", () => {
+    if (!mainWindow) return { ok: false, maximized: false };
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return { ok: true, maximized: mainWindow.isMaximized() };
+  });
+  ipcMain.handle("window:close", () => {
+    mainWindow?.close();
+    return { ok: true };
+  });
 
   ipcMain.handle("emby:login", async (_event, { server, username, password }) => {
     const normalizedServer = normalizeServer(server);
