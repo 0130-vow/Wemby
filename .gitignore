@@ -1,6 +1,9 @@
 node_modules/
 dist/
 out/
+vendor/mpv/
+vendor/.downloads/
+vendor/.mpv-extract/
 *.log
 .env
 .DS_Store

@@ -18,9 +18,15 @@ npm.cmd start
 
 如果 PowerShell 阻止 `npm` 脚本，使用 `npm.cmd`。
 
+`npm.cmd install` 会自动准备内置 mpv 到 `vendor/mpv/mpv.exe`。如果只想重新准备 mpv，可以运行：
+
+```powershell
+npm.cmd run prepare-mpv
+```
+
 ## mpv
 
-Wemby 会自动准备内置 mpv。首次播放时如果没有找到本机 mpv，会从 zhongfly/mpv-winbuild 的 GitHub Release 下载适合 Windows 的 mpv，并解压到应用用户数据目录。
+Wemby 会自动准备内置 mpv。安装依赖时会从 zhongfly/mpv-winbuild 的 GitHub Release 下载适合 Windows 的 mpv，并解压到项目内 `vendor/mpv/mpv.exe`。如果运行时仍没有找到 mpv，应用会再下载一份到用户数据目录作为兜底。
 
 应用查找 mpv 的顺序：
 

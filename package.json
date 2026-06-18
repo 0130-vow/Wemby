@@ -4,9 +4,11 @@
   "description": "A personal Windows Emby client focused on fast launch, smooth playback, and MPV-powered seeking.",
   "main": "src/main.js",
   "scripts": {
+    "postinstall": "node scripts/ensure-mpv.js --optional",
     "start": "electron .",
     "dev": "electron .",
-    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js"
+    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js && node --check scripts/ensure-mpv.js",
+    "prepare-mpv": "node scripts/ensure-mpv.js"
   },
   "keywords": [
     "emby",
