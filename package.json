@@ -1,6 +1,6 @@
 {
   "name": "wemby",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A personal Windows Emby client focused on fast launch, smooth playback, and MPV-powered seeking.",
   "main": "src/main.js",
   "scripts": {
