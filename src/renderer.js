@@ -10,9 +10,14 @@ const state = {
     title: "",
     positionSeconds: 0,
     durationSeconds: 0,
-    isPaused: false
+    isPaused: false,
+    volume: 100,
+    isMuted: false,
+    speed: 1
   },
   returnItemId: null,
+  isSeeking: false,
+  playerCinema: false,
   loading: false
 };
 
@@ -201,11 +206,29 @@ function updatePlayerChrome() {
   const title = document.querySelector("#playerTitle");
   const time = document.querySelector("#playerTime");
   const pause = document.querySelector("[data-player-command='togglePause']");
+  const mute = document.querySelector("[data-player-command='toggleMute']");
+  const progress = document.querySelector("#playerProgress");
+  const volume = document.querySelector("#playerVolume");
+  const speed = document.querySelector("#playerSpeed");
+  const fill = document.querySelector("#playerProgressFill");
   if (title) title.textContent = state.player.title || "正在启动播放";
   if (time) {
     time.textContent = `${formatClock(state.player.positionSeconds)} / ${formatClock(state.player.durationSeconds)}`;
   }
   if (pause) pause.textContent = state.player.isPaused ? "继续" : "暂停";
+  if (mute) mute.textContent = state.player.isMuted ? "取消静音" : "静音";
+  if (progress && !state.isSeeking) {
+    progress.max = String(Math.max(1, Math.floor(state.player.durationSeconds || 1)));
+    progress.value = String(Math.floor(state.player.positionSeconds || 0));
+  }
+  if (fill) {
+    const percent = state.player.durationSeconds
+      ? Math.max(0, Math.min(100, (state.player.positionSeconds / state.player.durationSeconds) * 100))
+      : 0;
+    fill.style.width = `${percent}%`;
+  }
+  if (volume) volume.value = String(Math.round(state.player.volume ?? 100));
+  if (speed) speed.value = String(state.player.speed || 1);
 }
 
 async function syncPlayerBounds() {
@@ -228,15 +251,33 @@ function renderPlayerView(itemId) {
       <div id="playerHost" class="player-host">
         <span>正在准备 mpv 画面...</span>
       </div>
+      <div class="player-progress-wrap">
+        <div id="playerProgressFill" class="player-progress-fill"></div>
+        <input id="playerProgress" class="player-progress-range" type="range" min="0" max="1" value="0" step="1" aria-label="播放进度" />
+      </div>
       <div class="player-controls">
         <button class="ghost" data-player-command="seek" data-value="-10">-10 秒</button>
         <button class="primary" data-player-command="togglePause">暂停</button>
         <button class="ghost" data-player-command="seek" data-value="30">+30 秒</button>
+        <button class="ghost" data-player-command="toggleMute">静音</button>
         <span id="playerTime" class="player-time">0:00 / 0:00</span>
+        <label class="player-volume">
+          <span>音量</span>
+          <input id="playerVolume" type="range" min="0" max="130" value="100" step="1" aria-label="音量" />
+        </label>
+        <select id="playerSpeed" class="player-speed" aria-label="播放速度">
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+        <button class="ghost" data-player-command="toggleCinema">影院</button>
         <button class="ghost danger" data-action="close-player">停止</button>
       </div>
     </section>
   `);
+  document.querySelector(".shell")?.classList.toggle("player-cinema", state.playerCinema);
   requestAnimationFrame(() => {
     syncPlayerBounds();
     updatePlayerChrome();
@@ -403,7 +444,10 @@ async function play(itemId, startTicks = 0) {
     title: "正在启动播放",
     positionSeconds: 0,
     durationSeconds: 0,
-    isPaused: false
+    isPaused: false,
+    volume: 100,
+    isMuted: false,
+    speed: 1
   };
   renderPlayerView(itemId);
   setNotice("正在启动 mpv...");
@@ -420,6 +464,16 @@ async function play(itemId, startTicks = 0) {
   } catch (error) {
     setNotice(error.message, "error");
   }
+}
+
+async function runPlayerCommand(action, value) {
+  if (action === "toggleCinema") {
+    state.playerCinema = !state.playerCinema;
+    document.querySelector(".shell")?.classList.toggle("player-cinema", state.playerCinema);
+    await syncPlayerBounds();
+    return;
+  }
+  await window.wemby.playerCommand({ action, value });
 }
 
 async function loadSettings() {
@@ -443,10 +497,7 @@ appEl.addEventListener("click", async (event) => {
   }
 
   if (playerCommand) {
-    await window.wemby.playerCommand({
-      action: playerCommand.dataset.playerCommand,
-      value: playerCommand.dataset.value
-    });
+    await runPlayerCommand(playerCommand.dataset.playerCommand, playerCommand.dataset.value);
     return;
   }
 
@@ -491,6 +542,36 @@ appEl.addEventListener("click", async (event) => {
   }
 });
 
+appEl.addEventListener("input", async (event) => {
+  if (event.target.id === "playerProgress") {
+    state.isSeeking = true;
+    state.player.positionSeconds = Number(event.target.value || 0);
+    updatePlayerChrome();
+  }
+
+  if (event.target.id === "playerVolume") {
+    state.player.volume = Number(event.target.value || 0);
+    updatePlayerChrome();
+    await runPlayerCommand("setVolume", state.player.volume);
+  }
+});
+
+appEl.addEventListener("change", async (event) => {
+  if (event.target.id === "playerProgress") {
+    state.isSeeking = false;
+    const seconds = Number(event.target.value || 0);
+    state.player.positionSeconds = seconds;
+    updatePlayerChrome();
+    await runPlayerCommand("seekAbsolute", seconds);
+  }
+
+  if (event.target.id === "playerSpeed") {
+    state.player.speed = Number(event.target.value || 1);
+    updatePlayerChrome();
+    await runPlayerCommand("setSpeed", state.player.speed);
+  }
+});
+
 appEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
@@ -525,6 +606,46 @@ window.addEventListener("resize", () => {
 window.addEventListener("scroll", () => {
   syncPlayerBounds();
 }, true);
+
+window.addEventListener("keydown", async (event) => {
+  if (state.currentView !== "player") return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+
+  if (event.code === "Space") {
+    event.preventDefault();
+    await runPlayerCommand("togglePause");
+  }
+  if (event.code === "ArrowLeft") {
+    event.preventDefault();
+    await runPlayerCommand("seek", event.shiftKey ? -60 : -10);
+  }
+  if (event.code === "ArrowRight") {
+    event.preventDefault();
+    await runPlayerCommand("seek", event.shiftKey ? 60 : 30);
+  }
+  if (event.code === "ArrowUp") {
+    event.preventDefault();
+    const next = Math.min(130, Math.round((state.player.volume ?? 100) + 5));
+    state.player.volume = next;
+    updatePlayerChrome();
+    await runPlayerCommand("setVolume", next);
+  }
+  if (event.code === "ArrowDown") {
+    event.preventDefault();
+    const next = Math.max(0, Math.round((state.player.volume ?? 100) - 5));
+    state.player.volume = next;
+    updatePlayerChrome();
+    await runPlayerCommand("setVolume", next);
+  }
+  if (event.code === "KeyM") {
+    event.preventDefault();
+    await runPlayerCommand("toggleMute");
+  }
+  if (event.code === "KeyF") {
+    event.preventDefault();
+    await runPlayerCommand("toggleCinema");
+  }
+});
 
 window.wemby.onNotice((notice) => setNotice(notice.message, notice.type || "info"));
 window.wemby.onPlayerState((playerState) => {

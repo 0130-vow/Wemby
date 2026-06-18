@@ -1125,5 +1125,124 @@ input {
 }
 
 .player-controls {
+  grid-template-columns: 82px 92px 82px 98px minmax(120px, 1fr) 180px 92px 82px 84px;
   background: rgba(18, 23, 30, .92);
+}
+
+.player-controls button,
+.player-time {
+  white-space: nowrap;
+}
+
+.player-controls button {
+  min-width: 0;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.player-progress-wrap {
+  position: relative;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .09);
+  overflow: hidden;
+}
+
+.player-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green), var(--green-2));
+  pointer-events: none;
+}
+
+.player-progress-range {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 18px;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+}
+
+.player-progress-range::-webkit-slider-thumb,
+.player-volume input::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f5fff8;
+  box-shadow: 0 0 0 4px rgba(90, 213, 111, .24);
+}
+
+.player-progress-range::-webkit-slider-runnable-track,
+.player-volume input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.player-volume {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+  align-items: center;
+  color: #aeb9c8;
+  font-size: 13px;
+}
+
+.player-volume input {
+  min-height: 20px;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  background: linear-gradient(90deg, rgba(90, 213, 111, .75), rgba(255, 255, 255, .16));
+  border-radius: 999px;
+}
+
+.player-speed {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #dfe7ef;
+  background: rgba(255, 255, 255, .055);
+}
+
+.player-cinema {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.player-cinema .sidebar {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.player-cinema .app-header {
+  height: 56px;
+}
+
+.player-cinema .content {
+  padding: 10px 18px 24px;
+}
+
+.player-cinema .player-topbar {
+  margin-bottom: 10px;
+}
+
+.player-cinema .player-host {
+  min-height: calc(100vh - 190px);
+}
+
+.player-cinema .player-controls {
+  grid-template-columns: 82px 92px 82px 98px minmax(110px, 1fr) 170px 86px 82px 78px;
 }

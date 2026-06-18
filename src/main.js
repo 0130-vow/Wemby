@@ -338,6 +338,9 @@ function notifyPlayerState(extra = {}) {
     positionSeconds: activePlayback?.positionSeconds || 0,
     durationSeconds: activePlayback?.durationSeconds || 0,
     isPaused: Boolean(activePlayback?.isPaused),
+    volume: activePlayback?.volume ?? 100,
+    isMuted: Boolean(activePlayback?.isMuted),
+    speed: activePlayback?.speed || 1,
     embedded: Boolean(activePlayback?.embedded),
     ...extra
   });
@@ -434,6 +437,9 @@ async function attachMpvIpc(pipePath, playback) {
   send(["observe_property", 1, "time-pos"]);
   send(["observe_property", 2, "duration"]);
   send(["observe_property", 3, "pause"]);
+  send(["observe_property", 4, "volume"]);
+  send(["observe_property", 5, "mute"]);
+  send(["observe_property", 6, "speed"]);
 
   socket.on("data", (chunk) => {
     buffer += chunk.toString("utf8");
@@ -447,6 +453,9 @@ async function attachMpvIpc(pipePath, playback) {
           if (event.name === "time-pos") playback.positionSeconds = Number(event.data || 0);
           if (event.name === "duration") playback.durationSeconds = Number(event.data || 0);
           if (event.name === "pause") playback.isPaused = Boolean(event.data);
+          if (event.name === "volume") playback.volume = Number(event.data ?? playback.volume ?? 100);
+          if (event.name === "mute") playback.isMuted = Boolean(event.data);
+          if (event.name === "speed") playback.speed = Number(event.data || 1);
           notifyPlayerState();
         }
       } catch {
@@ -520,6 +529,9 @@ async function playWithMpv(item, startTicks = 0, hostBounds = null) {
     positionSeconds: startTicks / 10000000,
     durationSeconds: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
     isPaused: false,
+    volume: 100,
+    isMuted: false,
+    speed: 1,
     progressTimer: null,
     socket: null
   };
@@ -746,6 +758,10 @@ app.whenReady().then(() => {
   ipcMain.handle("player:command", (_event, { action, value } = {}) => {
     if (action === "togglePause") return { ok: sendMpvCommand(["cycle", "pause"]) };
     if (action === "seek") return { ok: sendMpvCommand(["seek", Number(value || 0), "relative+exact"]) };
+    if (action === "seekAbsolute") return { ok: sendMpvCommand(["seek", Number(value || 0), "absolute+exact"]) };
+    if (action === "setVolume") return { ok: sendMpvCommand(["set_property", "volume", Math.max(0, Math.min(130, Number(value || 0)))]) };
+    if (action === "toggleMute") return { ok: sendMpvCommand(["cycle", "mute"]) };
+    if (action === "setSpeed") return { ok: sendMpvCommand(["set_property", "speed", Math.max(0.25, Math.min(3, Number(value || 1)))]) };
     if (action === "stop") return { ok: stopActivePlayback() };
     return { ok: false };
   });
@@ -762,6 +778,9 @@ app.whenReady().then(() => {
     positionSeconds: activePlayback?.positionSeconds || 0,
     durationSeconds: activePlayback?.durationSeconds || 0,
     isPaused: Boolean(activePlayback?.isPaused),
+    volume: activePlayback?.volume ?? 100,
+    isMuted: Boolean(activePlayback?.isMuted),
+    speed: activePlayback?.speed || 1,
     embedded: Boolean(activePlayback?.embedded)
   }));
 
