@@ -58,9 +58,9 @@ jobs:
           name: Wemby ${{ github.ref_name }}
           draft: false
           prerelease: false
+          generate_release_notes: true
           files: |
             release/*.exe
-            release/*.yml
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -69,5 +69,4 @@ jobs:
           name: Wemby-Windows
           path: |
             release/*.exe
-            release/*.yml
           if-no-files-found: warn

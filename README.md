@@ -35,8 +35,8 @@ npm.cmd run dist:win
 产物会输出到 `release/`。发布 GitHub Release 时，推送一个版本 tag 即可触发自动构建和上传：
 
 ```powershell
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
 GitHub Actions 会生成 NSIS 安装包和 portable exe，并附加到 Release。
