@@ -1,6 +1,6 @@
 {
   "name": "wemby",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A personal Windows Emby client focused on fast launch, smooth playback, and MPV-powered seeking.",
   "main": "src/main.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "dev": "electron .",
     "lint": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js && node --check scripts/ensure-mpv.js",
     "prepare-mpv": "node scripts/ensure-mpv.js",
-    "dist:win": "npm run prepare-mpv && electron-builder --win",
+    "build:win": "electron-builder --win",
+    "dist:win": "npm run prepare-mpv && npm run build:win",
     "pack:win": "npm run prepare-mpv && electron-builder --win --dir"
   },
   "keywords": [
